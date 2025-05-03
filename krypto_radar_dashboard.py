@@ -1,21 +1,24 @@
-### KryptoRadar mit CoinMarketCap, Preisverlauf & Telegram-Benachrichtigung
+### KryptoRadar – Neue Coins mit Erklärung & einmaliger Telegram-Benachrichtigung
 
 import streamlit as st
 import requests
 import pandas as pd
-import matplotlib.pyplot as plt
 from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="KryptoRadar 🛰️", layout="centered")
-st.title("🪙 KryptoRadar – Neue Coins & Telegram-Alarm")
+st.title("🪙 KryptoRadar – Nur brandneue Coins + Telegram-Info")
 
-# Auto-Refresh alle 60 Sekunden
+# Automatisch alle 60 Sekunden aktualisieren
 st_autorefresh(interval=60000, key="refresh")
 
 # Secrets laden
 CMC_API_KEY = st.secrets["CMC_API_KEY"]
 TELEGRAM_BOT_TOKEN = st.secrets["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = st.secrets["TELEGRAM_CHAT_ID"]
+
+# Session State für einmalige Telegram-Meldung
+if "notified_coins" not in st.session_state:
+    st.session_state.notified_coins = set()
 
 # Telegram-Nachricht senden
 def send_telegram_alert(message):
@@ -30,13 +33,13 @@ def send_telegram_alert(message):
     except Exception as e:
         st.error(f"Fehler beim Senden an Telegram: {e}")
 
-# Benutzer-Schalter
-send_telegram = st.toggle("📲 Telegram-Benachrichtigungen aktivieren")
-
-# CoinMarketCap API Setup
+# CMC API Setup
 CMC_URL = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest"
 headers = {"Accepts": "application/json", "X-CMC_PRO_API_KEY": CMC_API_KEY}
-params = {"start": "1", "limit": "10", "sort": "date_added", "convert": "USD"}
+params = {"start": "1", "limit": "25", "sort": "date_added", "convert": "USD"}
+
+st.markdown("Hier erscheinen nur **neue Coins**, jeweils nur einmal – mit Beschreibung.")
+send_telegram = st.toggle("📲 Telegram-Benachrichtigungen aktivieren")
 
 with st.spinner("🔍 Lade neue Coins von CoinMarketCap..."):
     try:
@@ -44,47 +47,43 @@ with st.spinner("🔍 Lade neue Coins von CoinMarketCap..."):
         data = response.json()["data"]
 
         for coin in data:
+            coin_id = coin["id"]
             name = coin["name"]
             symbol = coin["symbol"]
-            price = coin["quote"]["USD"]["price"]
-            marketcap = coin["quote"]["USD"]["market_cap"]
-            volume = coin["quote"]["USD"]["volume_24h"]
-            change = coin["quote"]["USD"]["percent_change_24h"]
             link = f"https://coinmarketcap.com/currencies/{coin['slug']}"
+            description_url = f"https://pro-api.coinmarketcap.com/v1/cryptocurrency/info?id={coin_id}"
 
-            st.markdown(f"**[{name} ({symbol})]({link})**")
-            st.write(f"💲 Preis: {price:.4f} $ | 💼 MarketCap: {int(marketcap):,} $")
-            st.write(f"📈 Volumen (24h): {int(volume):,} $ | Veränderung: {change:.2f} %")
+            # Nur anzeigen, wenn noch nicht verarbeitet
+            if coin_id in st.session_state.notified_coins:
+                continue
 
-            # Simulierter Preisverlauf
-            st.write("📉 Simulierter Preisverlauf der letzten 7 Tage (in $):")
-            fig, ax = plt.subplots()
-            fake_prices = [price * (1 + (i - 3) * 0.01) for i in range(7)]
-            ax.plot(range(1, 8), fake_prices, marker='o')
-            ax.set_xticks(range(1, 8))
-            ax.set_xticklabels([f"Tag {i}" for i in range(1, 8)])
-            ax.set_ylabel("Preis ($)")
-            ax.set_title(f"{symbol} – 7 Tage Preisentwicklung (simuliert)")
-            ax.grid(True)
-            st.pyplot(fig)
+            st.markdown(f"### 🆕 [{name} ({symbol})]({link})")
 
-            # Alarm bei bestimmten Bedingungen
-            if send_telegram and (change > 15 or marketcap < 5_000_000 or volume > 10_000_000):
-                message = (
-                    f"🚨 *KryptoRadar Alarm* 🚨\n"
+            # Beschreibung laden
+            desc_response = requests.get(description_url, headers=headers)
+            desc_data = desc_response.json()
+            description = desc_data.get("data", {}).get(str(coin_id), {}).get("description", "Keine Beschreibung verfügbar.")
+
+            short_desc = description.strip().split(".")[0][:400] + "..."
+            st.write(short_desc)
+
+            # Telegram senden (einmalig)
+            if send_telegram:
+                msg = (
+                    f"🚀 *Neuer Coin entdeckt!*\n"
                     f"*{name} ({symbol})*\n"
-                    f"💰 Preis: {price:.4f} $\n"
-                    f"📊 24h Änderung: {change:.2f}%\n"
-                    f"🏦 MarketCap: {int(marketcap):,} $\n"
-                    f"💸 Volumen (24h): {int(volume):,} $\n"
-                    f"🔗 [Zum Coin]({link})"
+                    f"{short_desc}\n"
+                    f"🔗 [Mehr erfahren]({link})"
                 )
-                send_telegram_alert(message)
+                send_telegram_alert(msg)
 
+            # Als verarbeitet markieren
+            st.session_state.notified_coins.add(coin_id)
             st.markdown("---")
 
     except Exception as e:
-        st.error("Fehler beim Laden der CoinMarketCap-Daten.")
+        st.error("Fehler beim Abrufen von CoinMarketCap-Daten.")
         st.exception(e)
 
-st.caption("Datenquelle: CoinMarketCap API – Nur zu Informationszwecken. Keine Finanzberatung.")
+st.caption("Nur neue Coins. Datenquelle: CoinMarketCap API. Keine Finanzberatung.")
+
