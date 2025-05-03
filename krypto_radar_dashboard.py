@@ -1,42 +1,37 @@
-### KryptoRadar mit CoinMarketCap, Preisverlauf & Mail-Benachrichtigung (via GMX)
+### KryptoRadar mit CoinMarketCap, Preisverlauf & Telegram-Benachrichtigung
 
 import streamlit as st
 import requests
 import pandas as pd
 import matplotlib.pyplot as plt
 from streamlit_autorefresh import st_autorefresh
-import smtplib
-from email.mime.text import MIMEText
 
 st.set_page_config(page_title="KryptoRadar 🛰️", layout="centered")
-st.title("🪙 KryptoRadar – Neue Coins & Alarm bei Bewegungen")
+st.title("🪙 KryptoRadar – Neue Coins & Telegram-Alarm")
 
 # Auto-Refresh alle 60 Sekunden
 st_autorefresh(interval=60000, key="refresh")
 
-# 🔌 Lade Secrets aus .streamlit/secrets.toml
+# Secrets laden
 CMC_API_KEY = st.secrets["CMC_API_KEY"]
-EMAIL_HOST = st.secrets["EMAIL_HOST"]
-EMAIL_PORT = st.secrets["EMAIL_PORT"]
-EMAIL_USER = st.secrets["EMAIL_USER"]
-EMAIL_PASS = st.secrets["EMAIL_PASS"]
+TELEGRAM_BOT_TOKEN = st.secrets["TELEGRAM_BOT_TOKEN"]
+TELEGRAM_CHAT_ID = st.secrets["TELEGRAM_CHAT_ID"]
 
-# Mail senden (optional über Schalter aktiviert)
-def send_email_alert(subject, message):
-    msg = MIMEText(message)
-    msg['Subject'] = subject
-    msg['From'] = EMAIL_USER
-    msg['To'] = "parchim1986@gmx.de"
+# Telegram-Nachricht senden
+def send_telegram_alert(message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
     try:
-        with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as server:
-            server.starttls()
-            server.login(EMAIL_USER, EMAIL_PASS)
-            server.send_message(msg)
+        requests.post(url, data=payload)
     except Exception as e:
-        st.error(f"Fehler beim E-Mail-Versand: {e}")
+        st.error(f"Fehler beim Senden an Telegram: {e}")
 
-# Mailversand aktivieren/deaktivieren
-send_emails = st.toggle("📩 Benachrichtigungen per Mail aktivieren")
+# Benutzer-Schalter
+send_telegram = st.toggle("📲 Telegram-Benachrichtigungen aktivieren")
 
 # CoinMarketCap API Setup
 CMC_URL = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest"
@@ -73,10 +68,18 @@ with st.spinner("🔍 Lade neue Coins von CoinMarketCap..."):
             ax.grid(True)
             st.pyplot(fig)
 
-            # Kriterien für Alarm
-            if send_emails and (change > 15 or marketcap < 5_000_000 or volume > 10_000_000):
-                msg = f"Coin: {name} ({symbol})\nPreis: {price:.4f} $\n24h: {change:.2f} %\nMarketCap: {marketcap:,.0f} $\nVolumen: {volume:,.0f} $\n{link}"
-                send_email_alert("🔔 KryptoRadar Alarm", msg)
+            # Alarm bei bestimmten Bedingungen
+            if send_telegram and (change > 15 or marketcap < 5_000_000 or volume > 10_000_000):
+                message = (
+                    f"🚨 *KryptoRadar Alarm* 🚨\n"
+                    f"*{name} ({symbol})*\n"
+                    f"💰 Preis: {price:.4f} $\n"
+                    f"📊 24h Änderung: {change:.2f}%\n"
+                    f"🏦 MarketCap: {int(marketcap):,} $\n"
+                    f"💸 Volumen (24h): {int(volume):,} $\n"
+                    f"🔗 [Zum Coin]({link})"
+                )
+                send_telegram_alert(message)
 
             st.markdown("---")
 
@@ -85,5 +88,3 @@ with st.spinner("🔍 Lade neue Coins von CoinMarketCap..."):
         st.exception(e)
 
 st.caption("Datenquelle: CoinMarketCap API – Nur zu Informationszwecken. Keine Finanzberatung.")
-
-
